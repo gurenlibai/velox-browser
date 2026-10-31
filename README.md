@@ -11,6 +11,13 @@
 [![minSdk](https://img.shields.io/badge/minSdk-26-blue)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-0%20bytes-brightgreen)]()
 
+**下载：[`velox-1.0.0.apk`](https://github.com/gurenlibai/velox-browser/releases/download/v1.0.0/velox-1.0.0.apk)（1,827,091 B，v2 签名）· [SHA256SUMS](https://github.com/gurenlibai/velox-browser/releases/download/v1.0.0/SHA256SUMS.txt) · [Release 页](https://github.com/gurenlibai/velox-browser/releases/tag/v1.0.0)**
+
+```bash
+sha256sum -c SHA256SUMS.txt           # cc90c8d8…af849a7
+adb install -r velox-1.0.0.apk        # Android 8.0+ (minSdk 26)
+```
+
 ---
 
 ## 1. 一句话结论（来自 42 分钟前置研究，全文见 [`docs/research/RESEARCH.md`](docs/research/RESEARCH.md)）
@@ -207,3 +214,20 @@ tools/build_blocklist.py     规则编译器
 - 研究引用来源全部列在 [`docs/research/RESEARCH.md`](docs/research/RESEARCH.md)，包括与我们结论相左的证据
 
 **Velox 不做的事**：不建账号、不云同步、不上传使用数据、不注入广告、不改写页面内容（除用户主动开启的拦截样式修正与阅读模式）。
+
+---
+
+## 附录 A · 已验证 / 未验证（诚实边界）
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| 单元测试 16/16 通过（拦截判定、URL 归一化） | ✅ 已验证 | `gradle testDebugUnitTest`，`tests="10"`+`tests="6"`，`failures=0` |
+| 拦截性能 10k 次判定 23.32ms（≈2.3µs/次） | ✅ 已验证 | 同上，JUnit 输出 `perf: 10k lookups in 23.32ms` |
+| release APK 签名有效（v2） | ✅ 已验证 | `apksigner verify --print-certs`，证书 SHA-256 `3c840c28…` |
+| 包名 / 版本 / minSdk / baseline profile 在包内 | ✅ 已验证 | `aapt2 dump badging`、APK 内含 `assets/dexopt/baseline.prof(.profm)` |
+| 公开可下载、sha256 与本地构建一致 | ✅ 已验证 | 匿名下载 1,827,091 B，sha256 `cc90c8d8…` 与 `SHA256SUMS.txt` 一致 |
+| 冷启动首帧耗时、滑动 jank、LCP 对比数据 | ⛔ **未验证** | 本构建环境无 `/dev/kvm`、CPU 无 vmx，无法运行模拟器；需按 [`bench/RUNBOOK.md`](bench/RUNBOOK.md) 在实体机上采集 |
+| 「首帧严格先于引擎创建」的运行时顺序 | ⛔ **未验证（仅有代码约束 + logcat 验证脚本）** | 代码约束见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)；运行时用 `bench/RUNBOOK.md` §1b 的 logcat 命令证伪 |
+| 超越 Chrome / Edge 的结论 | ⚠️ **有条件主张** | 依据是机制与可测指标（[`docs/BENCHMARK.md`](docs/BENCHMARK.md) D1–D7），不是本机实测；任何一条指标达不成就按 §3 撤稿 |
+
+> Velox 不为「更快」这一形容词背书，只为上表里可复现的数字与其验证方法背书。

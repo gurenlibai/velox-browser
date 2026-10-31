@@ -26,6 +26,18 @@ adb shell cat /proc/meminfo | head -1
 > 对齐说明：`am start -W` 的 TotalTime 与 TTID 口径接近；TTFD 需在应用内
 > `reportFullyDrawn()`（Velox 已在首帧后调用）后用 `dumpsys gfxinfo` 或 Perfetto 对齐。
 
+### 1b. 验证「首帧不依赖引擎」（本项目最硬的一条主张）
+
+```bash
+adb shell am force-stop com.velox.browser
+adb logcat -c
+adb shell am start -n com.velox.browser/.MainActivity
+adb logcat -s VeloxLatency | grep -E "startup\."
+```
+
+必须看到 `startup.snapshotVisible` 与 `startup.toFirstFrame` **早于** `startup.engineCreatedAt`。
+顺序颠倒即表示本机制失效，README 的相关表述必须删除。
+
 ## 2. 滑动流畅度（D4）
 
 ```bash

@@ -55,7 +55,10 @@ Looper.myQueue().addIdleHandler {
 Chrome 的做法（Freeze-Dried Tabs）拿到 13%；Velox 的目标是**首帧完全不需要引擎**：
 
 - 离开页面 / `onPause` 时，在后台线程把 **URL + 标题 + 滚动位置 + 一张降采样位图** 写入本地（`filesDir/snapshots`）。
-- 冷启动时 `SnapshotView` 立即显示该位图（典型 <16ms 绘制），同时 `KernelWarmup` 与 `loadUrl` 在后台推进；`onPageCommitVisible` 到达后淡出快照。
+- 冷启动时 `SnapshotView` 立即显示该位图（典型 <16ms 绘制）。
+- **顺序是硬约束**：第一帧只允许纯 View；`WebView` 的创建/首次 `attach` 一律推迟到首个
+  `Choreographer` 帧回调之后（`MainActivity.deferEngine`）。否则「零引擎首帧」不成立。
+- 引擎就绪后 `onPageCommitVisible` 到达时淡出快照。
 - 与 Chrome 的差异：Chrome 的 freeze-dried tab 是一份可交互的轻量文档渲染；Velox 的取舍是**零引擎 + 零解析**，因此首帧更早，代价是快照不可交互（点击即进入真实页面，`WebView` 已在下方就绪，通常无感）。
 
 > 证伪条件：若实测冷启动 TTID 未领先，则该策略在同一 PR 中回退，不保留。

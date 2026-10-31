@@ -31,8 +31,8 @@ object Interceptor {
         if (!enabled) return false
         val list = BlockList.loaded() ?: return false
         if (list.isEmpty()) return false
-        if (list.shouldBlock(url)) { blockedCount++; return true }
         checkedCount++
+        if (list.shouldBlock(url)) { blockedCount++; return true }
         return false
     }
 

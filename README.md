@@ -39,11 +39,23 @@
    - `Profile#warmUpRendererProcess()`（预 fork 渲染进程）
    - `Profile#preconnect(上次停留站点)`（省掉 DNS+TCP+TLS 的 1~3 个 RTT）
    - 全部挂在 `Looper.myQueue().addIdleHandler`，**不阻塞 `Application.onCreate`**
-2. `SnapshotStore` + `SnapshotView`（[`SnapshotStore.kt`](app/src/main/java/com/velox/browser/browser/SnapshotStore.kt)、[`SnapshotView.kt`](app/src/main/java/com/velox/browser/ui/SnapshotView.kt)）
+2. **严格的首帧顺序**（[`MainActivity.kt`](app/src/main/java/com/velox/browser/MainActivity.kt) `deferEngine()`）
+   - 第一帧只由**纯 View** 组成：快照视图 + 工具栏，**此时 WebView 还不存在**
+   - WebView 的创建被推到「首个 Choreographer 帧之后」（`Choreographer.postFrameCallback`），
+     绝不会阻塞首帧渲染
+   - 可直接验证：`adb logcat -s VeloxLatency`
+     ```
+     startup.toFirstFrame=XXms
+     startup.snapshotVisible=XXms   # 早于下一行
+     startup.engineCreatedAt=XXms
+     ```
+     若 `engineCreatedAt` 早于 `toFirstFrame`，本机制视为失效。
+
+3. `SnapshotStore` + `SnapshotView`（[`SnapshotStore.kt`](app/src/main/java/com/velox/browser/browser/SnapshotStore.kt)、[`SnapshotView.kt`](app/src/main/java/com/velox/browser/ui/SnapshotView.kt)）
    - 上次会话的页面快照以 WebP 落盘（≤720px，质量 70），冷启动时直接贴图出帧
-   - 首次绘制成本 ≈ 一次位图绘制（<16ms），引擎在后台继续启动，`onPageCommitVisible` 到达后淡出
+   - 首次绘制成本 ≈ 一次位图绘制（<16ms），引擎就绪后 `onPageCommitVisible` 到达时淡出
    - 无痕标签页的快照**只存内存，永不落盘**
-3. Baseline Profile（[`baseline-prof.txt`](app/src/main/baseline-prof.txt)）覆盖启动热路径；Google 官方数据：冷启动最高 **40%**，独立实测 22%/26%/30%/36%
+4. Baseline Profile（[`baseline-prof.txt`](app/src/main/baseline-prof.txt)）覆盖启动热路径；Google 官方数据：冷启动最高 **40%**，独立实测 22%/26%/30%/36%
 
 ### 2.2 触摸意图引擎：移动端唯一「早于点击」的高置信信号
 

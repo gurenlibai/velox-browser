@@ -25,6 +25,15 @@
 - 阅读模式、页内查找、桌面版 UA 切换、分享
 - 无痕会话使用独立 WebView Profile，退出即销毁
 
+### 复核后修复（首发前）
+- **首帧/引擎顺序**：WebView 创建改为首个 Choreographer 帧之后，确保首帧渲染完全不触碰 Chromium
+- **主题兼容**：改用 `Theme.AppCompat.DayNight.NoActionBar`（AppCompatActivity 的硬性要求）
+- **http 站点**：允许 cleartext，浏览器不再只能打开 HTTPS
+- **新窗口**：支持 `target=_blank` / `window.open`，在浏览器内新开标签页而非静默失败
+- **下载**：接入系统 `DownloadManager`（带 Cookie 与 UA，通知栏可见）
+- **JS 桥刷新**：Chromium 在注册时对对象做快照，导航后重新注入桥与命中脚本
+- **拦截计数**：判定计数全部计入（先前仅在未命中时累加）
+
 ### 稳定性
 - `onRenderProcessGone` 全量恢复（WebView 单 renderer 的补偿）
 - 规则资产损坏时降级为空规则集，不阻断浏览

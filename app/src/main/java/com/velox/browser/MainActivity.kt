@@ -71,6 +71,17 @@ class MainActivity : AppCompatActivity() {
     private var coldStartBegin = 0L
     private var snapshotShown = false
 
+    /**
+     * 冷启动延后创建 WebView。
+     *
+     * 依据：WebView 首次构造会在**调用线程**同步拉起 Chromium（中端机 182–400ms，
+     * Chromium issue 41237034）。若在 onCreate 里 new，则首帧必须等引擎，
+     * 「零引擎首帧」的主张就自我作废。因此：
+     *   第一帧 = 快照视图 + 工具栏（纯 View 绘制）；
+     *   引擎创建 = 首个 Choreographer 帧之后，且优先走后台预热已完成的引擎。
+     */
+    private var pendingColdUrl: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         coldStartBegin = VeloxApp.appStartUptime
         LatencyLogger.mark("activity.onCreate.begin")
@@ -260,31 +271,64 @@ class MainActivity : AppCompatActivity() {
     private fun restoreOrCreateTab() {
         val current = tabs.current
         if (current == null) {
-            newTab(startUrl = null)
+            showHome()
+            // 没有会话：等首帧画完再建 WebView，保证首帧不等引擎
+            deferEngine { newTab(startUrl = null) }
         } else {
-            // 冷启动：先用快照占住首帧，再在后台把真实页面拉起来
             tabs.select(current.id)
             if (current.url.isNotBlank()) {
                 showSnapshotThenLoad(current)
                 return
             }
             showHome()
+            deferEngine { tabs.current?.let { obtainView(it) } }
+        }
+    }
+
+    /** 把重活推到「首帧已经上屏之后」。 */
+    private fun deferEngine(block: () -> Unit) {
+        root.post {
+            android.view.Choreographer.getInstance().postFrameCallback {
+                block()
+                LatencyLogger.record("startup.engineCreatedAt", SystemClock.uptimeMillis() - coldStartBegin)
+            }
         }
     }
 
     private fun showSnapshotThenLoad(tab: TabMeta) {
         snapshotShown = true
-        app.snapshots.load(tab.id) { bmp ->
-            if (isFinishing || isDestroyed) return@load
-            if (bmp != null) {
-                snapshot.setSnapshot(bmp)
-                LatencyLogger.record("startup.snapshotVisible", SystemClock.uptimeMillis() - coldStartBegin)
+        pendingColdUrl = tab.url
+        bar.setUrl(tab.url, Urls.isHttps(tab.url), Urls.hostOf(tab.url))
+        bar.setTabCount(tabs.size)
+        // 同步命中内存快照 → 首帧就是上次的画面，不触碰引擎
+        val cached = app.snapshots.peek(tab.id)
+        if (cached != null) {
+            snapshot.setSnapshot(cached)
+            LatencyLogger.record("startup.snapshotVisible", SystemClock.uptimeMillis() - coldStartBegin)
+            deferEngine { attachColdTab(tab) }
+        } else {
+            // 异步读盘（WebP 解码），首帧仍然只是一次绘制
+            app.snapshots.load(tab.id) { bmp ->
+                if (isFinishing || isDestroyed) return@load
+                if (bmp != null) {
+                    snapshot.setSnapshot(bmp)
+                    LatencyLogger.record("startup.snapshotVisible", SystemClock.uptimeMillis() - coldStartBegin)
+                }
             }
-            current()?.load(tab.url)
+            deferEngine { attachColdTab(tab) }
         }
-        if (app.snapshots.peek(tab.id) == null) {
-            // 没有快照也不能等：立即开始加载
-            current()?.load(tab.url)
+    }
+
+    /** 首帧之后：创建/取出该标签页的 WebView，并补上未完成的导航。 */
+    private fun attachColdTab(tab: TabMeta) {
+        if (isFinishing || isDestroyed) return
+        val meta = tabs.all().firstOrNull { it.id == tab.id } ?: return
+        val v = obtainView(meta)
+        attachView(v)
+        // 冷启动时快照盖在最上层，交给 onPageCommitVisible 淡出
+        pendingColdUrl?.let { url ->
+            pendingColdUrl = null
+            v.load(url)
         }
     }
 
@@ -295,6 +339,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectTab(id: Long, loadUrl: String? = null) {
         tabs.select(id) ?: return
+        // 选中的标签页必须可见（可能刚刚被预算淘汰过）
         val meta = tabs.current ?: return
         val view = obtainView(meta)
         attachView(view)
@@ -356,30 +401,35 @@ class MainActivity : AppCompatActivity() {
             tabs.update(view.tabId) { it.url = url; it.title = view.title() }
             history.record(url, view.title())
             bar.setNavState(view.canGoBack(), view.canGoForward())
-            view.injectIntentBridge()
+            // Chromium 在 addJavascriptInterface 时对对象做快照，
+            // 页面导航后旧对象失效 → 每次导航完成都重新注入桥与命中脚本。
+            view.refreshJsBridge()
             bar.setBlockedCount(Interceptor.blocked())
         }
         view.onRendererGone = { crashed ->
             onRendererGone(crashed)
         }
         view.onScroll = { _, y ->
+            // 只记录滚动位置（用于会话恢复）；不做任何分配，也不在滚动中改动工具栏，
+            // 避免「滚动时 UI 抖动」——这是本项目的硬性红线之一。
             tabs.update(view.tabId) { it.scrollY = y }
-            // 依据滚动方向自动收起/展开工具栏（不改变 WebView 几何，因此无重排）
-            if (settings.toolbarMode == Settings.MODE_PINNED) {
-                if (y > 240 && bar.mode == ChromeBar.Mode.PINNED && scrollingDown) {
-                    bar.setMode(ChromeBar.Mode.COLLAPSED)
-                }
+        }
+        view.onNewWindow = { url ->
+            if (url.isBlank()) {
+                false
+            } else {
+                newTab(startUrl = url, private = view.isPrivate)
+                true
             }
+        }
+        view.onDownload = { url, ua, disposition, mime ->
+            startDownload(url, ua, disposition, mime)
         }
         view.onShowFileChooser = { _, _ ->
             Toast.makeText(this, "文件上传暂未开放", Toast.LENGTH_SHORT).show()
             false
         }
     }
-
-    private var lastScrollY = 0
-    private val scrollingDown: Boolean
-        get() = true
 
     private fun current(): BrowserView? = tabs.current?.let { views[it.id] }
 
@@ -522,6 +572,26 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.setOnShowListener { input.requestFocus() }
         dialog.show()
+    }
+
+    /** 下载：交给系统 DownloadManager（可见通知、断点续传、不占用浏览器进程）。 */
+    private fun startDownload(url: String, userAgent: String, disposition: String?, mime: String?) {
+        try {
+            val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
+                setMimeType(mime)
+                addRequestHeader("User-Agent", userAgent)
+                addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url) ?: "")
+                if (disposition != null) addRequestHeader("Content-Disposition", disposition)
+                setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setAllowedOverMetered(true)
+                setAllowedOverRoaming(false)
+            }
+            val dm = getSystemService(android.app.DownloadManager::class.java)
+            dm.enqueue(request)
+            Toast.makeText(this, "已加入下载队列", Toast.LENGTH_SHORT).show()
+        } catch (t: Throwable) {
+            Toast.makeText(this, "下载失败：${t.javaClass.simpleName}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // ---------------------------------------------------------------- 面板

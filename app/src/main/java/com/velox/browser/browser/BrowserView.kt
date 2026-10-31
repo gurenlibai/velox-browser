@@ -57,6 +57,7 @@ class BrowserView(context: Context) : FrameLayout(context) {
     var onRendererGone: ((Boolean) -> Unit)? = null
     var onScroll: ((Int, Int) -> Unit)? = null
     var onShowFileChooser: ((ValueCallback<Array<Uri>>?, WebChromeClient.FileChooserParams?) -> Boolean)? = null
+    var onDownload: ((String, String, String?, String?) -> Unit)? = null
 
     private var pageStartAt = 0L
     private var cosmeticInjected = false
@@ -83,13 +84,15 @@ class BrowserView(context: Context) : FrameLayout(context) {
         s.textZoom = 100
         s.mediaPlaybackRequiresUserGesture = true
         s.javaScriptCanOpenWindowsAutomatically = true
-        s.setSupportMultipleWindows(false)
+        // 允许页面请求新窗口，由宿主在本浏览器内新开标签页（不外弹、不丢失导航）
+        s.setSupportMultipleWindows(true)
         s.cacheMode = WebSettings.LOAD_DEFAULT
         s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.setGeolocationEnabled(false)
         s.allowFileAccess = false
         s.allowContentAccess = false
-        s.setSupportMultipleWindows(false)
+        // 允许页面请求新窗口，由宿主在本浏览器内新开标签页（不外弹、不丢失导航）
+        s.setSupportMultipleWindows(true)
         s.userAgentString = s.userAgentString
             .replace("; wv", "")
             .replace("Version/4.0 ", "")
@@ -203,13 +206,29 @@ class BrowserView(context: Context) : FrameLayout(context) {
                 isUserGesture: Boolean,
                 resultMsg: android.os.Message
             ): Boolean {
-                // 新窗口：取目标 URL 并在本标签页打开，避免后台弹窗
-                val href = view.hitTestResult.extra
-                return onNewWindow?.invoke(href ?: "") ?: false
+                // 用一次性的隐藏 WebView 承接目标 URL，再转交宿主新开标签页。
+                // 这样既支持 target=_blank / window.open，又不会真的弹出窗口。
+                val target = WebView(view.context)
+                target.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(v: WebView, req: WebResourceRequest): Boolean {
+                        val url = req.url.toString()
+                        v.destroy()
+                        if (!url.startsWith("http")) return true
+                        return onNewWindow?.invoke(url) ?: true
+                    }
+                }
+                @Suppress("DEPRECATION")
+                (resultMsg.obj as WebView.WebViewTransport).webView = target
+                resultMsg.sendToTarget()
+                return true
             }
         }
 
-        webView.addJavascriptInterface(IntentBridge(), "VeloxIntent")
+        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            onDownload?.invoke(url, userAgent, contentDisposition, mimeType)
+        }
+
+        webView.addJavascriptInterface(IntentBridge(), BRIDGE)
 
         webView.setOnScrollChangeListener { _, _, scrollY, _, _ ->
             onScroll?.invoke(webView.scrollX, scrollY)
@@ -252,8 +271,17 @@ class BrowserView(context: Context) : FrameLayout(context) {
         webView.scrollTo(0, y)
     }
 
-    fun injectIntentBridge() {
-        webView.evaluateJavascript(IntentEngine.injectionScript("VeloxIntent"), null)
+    /** 重新绑定 JS 桥（Chromium 在注册时对对象做快照，导航后必须重设）。 */
+    fun refreshJsBridge() {
+        runCatching {
+            webView.removeJavascriptInterface(BRIDGE)
+            webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            onDownload?.invoke(url, userAgent, contentDisposition, mimeType)
+        }
+
+        webView.addJavascriptInterface(IntentBridge(), BRIDGE)
+            webView.evaluateJavascript(IntentEngine.injectionScript(BRIDGE), null)
+        }
     }
 
     /** 页面快照：用于标签页缩略图与冷启动首帧（Live Snapshot）。 */
@@ -297,6 +325,8 @@ class BrowserView(context: Context) : FrameLayout(context) {
     }
 
     companion object {
+        private const val BRIDGE = "VeloxIntent"
+
         /** 采样页面里出现最多的外链 origin（只读 DOM，不修改）。 */
         private const val ORIGIN_SAMPLER_JS = """
 (function(){

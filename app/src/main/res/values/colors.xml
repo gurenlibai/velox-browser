@@ -1,0 +1,13 @@
+<resources>
+    <color name="ink">#FF101318</color>
+    <color name="ink_soft">#FF1A1F27</color>
+    <color name="ink_line">#22FFFFFF</color>
+    <color name="paper">#FFF7F8FA</color>
+    <color name="paper_soft">#FFFFFFFF</color>
+    <color name="accent">#FF14D6A4</color>
+    <color name="accent_dim">#6614D6A4</color>
+    <color name="text_primary">#FF101318</color>
+    <color name="text_secondary">#FF5C6572</color>
+    <color name="text_on_dark">#FFF2F5F8</color>
+    <color name="danger">#FFFF5A5F</color>
+</resources>

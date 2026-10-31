@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">Velox</string>
+    <string name="search_hint">搜索或输入网址</string>
+    <string name="new_tab">新建标签页</string>
+    <string name="tabs">标签页</string>
+    <string name="menu">菜单</string>
+    <string name="back">后退</string>
+    <string name="forward">前进</string>
+    <string name="reload">刷新</string>
+    <string name="close">关闭</string>
+    <string name="home">主页</string>
+    <string name="quick_access">快速访问</string>
+    <string name="blocked">已拦截</string>
+    <string name="settings">设置</string>
+    <string name="history">历史记录</string>
+    <string name="downloads">下载</string>
+    <string name="share">分享</string>
+    <string name="copy_link">复制链接</string>
+    <string name="find_in_page">页内查找</string>
+    <string name="desktop_site">桌面版网站</string>
+    <string name="reader_mode">阅读模式</string>
+    <string name="private_mode">无痕模式</string>
+    <string name="exit_private">退出无痕</string>
+    <string name="add_to_home">添加到桌面</string>
+    <string name="clear_data">清除数据</string>
+    <string name="close_all_tabs">关闭全部标签页</string>
+    <string name="performance">性能</string>
+    <string name="privacy">隐私</string>
+    <string name="about">关于</string>
+</resources>
